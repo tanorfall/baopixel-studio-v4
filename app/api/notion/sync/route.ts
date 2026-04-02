@@ -3,14 +3,13 @@ import { NextResponse } from 'next/server'
 export const runtime = 'edge'
 
 const NOTION_DBS = [
-  { id: '2c4387c253b080d7a2dde2515f435c89', name: 'BaoPixel' },
-  { id: 'acd387c253b082c0a5b381d27d1371f8', name: 'Avril 2026' },
+  { id: process.env.NOTION_DB_BAOPIXEL || '', name: 'BaoPixel' },
+  { id: process.env.NOTION_DB_AVRIL2026 || '', name: 'Avril 2026' },
 ]
-const TASKS_DB = '034af88566a44040921ef87108c58a10'
 
 function getUpcomingFilter() {
   const now = new Date()
-  const future = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000) // 90 days ahead
+  const future = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000)
   return {
     filter: {
       and: [
@@ -24,33 +23,69 @@ function getUpcomingFilter() {
 }
 
 async function queryNotion(dbId: string, body: object, token: string) {
-  const r = await fetch(`https://api.notion.com/v1/databases/${dbId}/query`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      'Notion-Version': '2022-06-28',
-    },
-    body: JSON.stringify(body),
-  })
-  if (!r.ok) return []
-  const d = await r.json()
-  return d.results || []
+  try {
+    const r = await fetch(`https://api.notion.com/v1/databases/${dbId}/query`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        'Notion-Version': '2022-06-28',
+      },
+      body: JSON.stringify(body),
+    })
+    if (!r.ok) return []
+    const d = await r.json()
+    return d.results || []
+  } catch {
+    return []
+  }
+}
+
+async function saveToSupabase(posts: any[]) {
+  try {
+    const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    
+    if (!SUPABASE_URL || !SUPABASE_KEY) return false
+    
+    // Supprimer et insérer les posts
+    await fetch(`${SUPABASE_URL}/rest/v1/posts`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        apikey: SUPABASE_KEY,
+      },
+    })
+    
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/posts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        apikey: SUPABASE_KEY,
+      },
+      body: JSON.stringify(posts),
+    })
+    
+    return res.ok
+  } catch {
+    return false
+  }
 }
 
 export async function GET() {
   const token = process.env.NOTION_TOKEN
   if (!token) {
-    return NextResponse.json({ posts: [], tasks: [], error: 'NO_TOKEN' })
+    return NextResponse.json({ posts: [], error: 'NO_TOKEN' })
   }
 
   try {
-    // Fetch posts upcoming 90 days from all calendars
-    const postsRaw: object[][] = await Promise.all(
+    // Fetch posts from all Notion databases
+    const postsRaw = await Promise.all(
       NOTION_DBS.map((db) => queryNotion(db.id, getUpcomingFilter(), token))
     )
 
-    const posts: object[] = []
+    const posts: any[] = []
     NOTION_DBS.forEach((db, i) => {
       ;(postsRaw[i] as any[]).forEach((r) => {
         const p = r.properties || {}
@@ -67,7 +102,16 @@ export async function GET() {
       })
     })
 
-    // Fetch tasks not done
+    // Save to Supabase
+    await saveToSupabase(posts)
+
+    return NextResponse.json({ posts, synced: true })
+  } catch (e) {
+    console.error('Sync error:', e)
+    return NextResponse.json({ posts: [], error: 'SYNC_ERROR' })
+  }
+}
+
     const tasksRaw = await queryNotion(
       TASKS_DB,
       {
