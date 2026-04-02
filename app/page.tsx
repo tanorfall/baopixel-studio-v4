@@ -1494,7 +1494,7 @@ export default function BaoPixelStudio() {
             <div className="h-ca-dot"/>
             <span>{fmtK(ca)} FCFA</span>
           </div>
-          <button className="h-btn h-notif" onClick={syncNotion} title="Synchroniser Notion">
+          <button className="h-btn h-notif" onClick={() => syncNotion(false)} title="Synchroniser Notion">
             <i className={`bi bi-arrow-clockwise ${syncing?'spin':''}`}/>
             <div className={`h-badge${activePosts.length>0?' show':''}`}/>
           </button>
